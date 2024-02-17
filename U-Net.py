@@ -24,6 +24,15 @@ class UNet(nn.Module):
         self.up4 = Up(128, 64)
         self.conv = nn.Conv2d(64, out_channels, 1)
 
+        # added layers to reduce size of image to 1x1 for classification
+        self.reduce_size = nn.Sequential(nn.Conv2d(out_channels, out_channels, 3, stride=2),    # result = (batch_size, 10, 13, 13)
+                                        nn.ReLU(),
+                                        nn.Conv2d(out_channels, out_channels, 3, stride=2),    # result = (batch_size, 10, 5, 5)
+                                        nn.ReLU(),
+                                        nn.Conv2d(out_channels, out_channels, 3, stride=2),    # result = (batch_size, 10, 2, 2)
+                                        nn.ReLU(), 
+                                        nn.Conv2d(out_channels, out_channels, 2))    # result = (batch_size, 10, 1, 1)
+
     def forward(self, x):
         x1 = self.double_conv(x)     # no padding: x1 = (2, 64, 28, 28)
         x2 = self.down1(x1)          # x2 = (2, 128, 12, 12)
@@ -34,6 +43,8 @@ class UNet(nn.Module):
         x = self.up2(x, x3)
         x = self.up3(x, x2)
         x = self.up4(x, x1)
+        x = self.conv(x)
+        x = self.reduce_size(x)
         return x
 
 class Down(nn.Module):
@@ -78,20 +89,21 @@ lr = 0.01
 epochs = 10
 criterion = nn.CrossEntropyLoss()
 
+# taken from pytorch tutorial
 transform = transforms.Compose(
     [transforms.ToTensor(),
      transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
-trainset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
-trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size,shuffle=True, num_workers=2)
+trainset = torchvision.datasets.CIFAR10(root='./data', train=True, download=False, transform=transform)
+trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size,shuffle=True)             # can't have more than 1 num_workers on local computer
 
-testset = torchvision.datasets.CIFAR10(root='./data', train=False, download=True, transform=transform)
-testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=False, num_workers=2)
+testset = torchvision.datasets.CIFAR10(root='./data', train=False, download=False, transform=transform)
+testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=False)
 
 classes = ('plane', 'car', 'bird', 'cat',
            'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
 
-model = UNet(in_channels=3, out_channels=23)           # 20 classes in PASCAL VOC 2012
+model = UNet(in_channels=3, out_channels=10)       # CIFAR-10 has 10 classes    
 optimizer = optim.Adam(model.parameters(), lr=lr)
 
 # Training
@@ -102,13 +114,23 @@ for epoch in range(epochs):
     for batch_num, pairs in enumerate(trainloader):
         img, label = pairs
         optimizer.zero_grad()       # Get rid of residual gradients
-        output = model(img)
+        logits = model(img).squeeze()       # remove extra dimensions
+        logits = torch.nn.functional.softmax(logits, dim=1)     # softmax for cross entropy loss for classification
+        #output = torch.argmax(logits, dim=1)
+        
+        # take majority vote to get label for entire image
+        # pred = torch.flatten(output, start_dim=1)
+        # final_pred = torch.zeros(batch_size)
+        # for batch in range(batch_size):
+        #     final_pred[batch] = torch.argmax(torch.bincount(pred[batch]))
+        # final_pred = final_pred.float()
 
-        loss = criterion(output, label)     # image segmentation. not classification
+        loss = criterion(logits, label)     # classification not image segmentation
         loss.backward()
         optimizer.step()
 
-        pred = torch.argmax(dim=1)
+        pred = torch.argmax(logits, dim=1)
+
         accuracy += np.count_nonzero(pred == label)
     total_accuracy = accuracy / len(trainset)
     print("Accuracy at epoch ", epoch, " is ", total_accuracy)
