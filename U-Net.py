@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.optim as optim
 import torchvision
 import torchvision.transforms as transforms
+from tqdm import tqdm
 
 # Model 
 
@@ -84,66 +85,70 @@ class Up(nn.Module):
         x = self.relu(self.conv2(x))
         return x
 
-batch_size = 2
-lr = 0.01
-epochs = 10
-criterion = nn.CrossEntropyLoss()
+def main():
+    batch_size = 10
+    lr = 0.01
+    epochs = 10
+    criterion = nn.CrossEntropyLoss()
 
-# taken from pytorch tutorial
-transform = transforms.Compose(
-    [transforms.ToTensor(),
-     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+    # taken from pytorch tutorial
+    transform = transforms.Compose(
+        [transforms.ToTensor(),
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
-trainset = torchvision.datasets.CIFAR10(root='./data', train=True, download=False, transform=transform)
-trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size,shuffle=True)             # can't have more than 1 num_workers on local computer
+    trainset = torchvision.datasets.CIFAR10(root='./data', train=True, download=False, transform=transform)
+    trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size,shuffle=True)             # can't have more than 1 num_workers on local computer
 
-testset = torchvision.datasets.CIFAR10(root='./data', train=False, download=False, transform=transform)
-testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=False)
+    testset = torchvision.datasets.CIFAR10(root='./data', train=False, download=False, transform=transform)
+    testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=False)
 
-classes = ('plane', 'car', 'bird', 'cat',
-           'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
+    classes = ('plane', 'car', 'bird', 'cat',
+            'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
 
-model = UNet(in_channels=3, out_channels=10)       # CIFAR-10 has 10 classes    
-optimizer = optim.Adam(model.parameters(), lr=lr)
+    model = UNet(in_channels=3, out_channels=10)       # CIFAR-10 has 10 classes    
+    optimizer = optim.Adam(model.parameters(), lr=lr)
 
-# Training
+    # Training
 
-model.train()
-for epoch in range(epochs):
-    accuracy = 0
-    for batch_num, pairs in enumerate(trainloader):
-        img, label = pairs
-        optimizer.zero_grad()       # Get rid of residual gradients
-        logits = model(img).squeeze()       # remove extra dimensions
-        logits = torch.nn.functional.softmax(logits, dim=1)     # softmax for cross entropy loss for classification
-        #output = torch.argmax(logits, dim=1)
-        
-        # take majority vote to get label for entire image
-        # pred = torch.flatten(output, start_dim=1)
-        # final_pred = torch.zeros(batch_size)
-        # for batch in range(batch_size):
-        #     final_pred[batch] = torch.argmax(torch.bincount(pred[batch]))
-        # final_pred = final_pred.float()
+    model.train()
+    for epoch in range(epochs):
+        accuracy = 0
+        for _, pairs in tqdm(enumerate(trainloader), total=len(trainloader)):
+            img, label = pairs
+            optimizer.zero_grad()       # Get rid of residual gradients
+            logits = model(img).squeeze()       # remove extra dimensions
+            logits = torch.nn.functional.softmax(logits, dim=1)     # softmax for cross entropy loss for classification
+            #output = torch.argmax(logits, dim=1)
+            
+            # take majority vote to get label for entire image
+            # pred = torch.flatten(output, start_dim=1)
+            # final_pred = torch.zeros(batch_size)
+            # for batch in range(batch_size):
+            #     final_pred[batch] = torch.argmax(torch.bincount(pred[batch]))
+            # final_pred = final_pred.float()
 
-        loss = criterion(logits, label)     # classification not image segmentation
-        loss.backward()
-        optimizer.step()
+            loss = criterion(logits, label)     # classification not image segmentation
+            loss.backward()
+            optimizer.step()
 
-        pred = torch.argmax(logits, dim=1)
+            pred = torch.argmax(logits, dim=1)
 
-        accuracy += np.count_nonzero(pred == label)
-    total_accuracy = accuracy / len(trainset)
-    print("Accuracy at epoch ", epoch, " is ", total_accuracy)
+            accuracy += np.count_nonzero(pred == label)
+        total_accuracy = accuracy / len(trainset)
+        print("Accuracy at epoch ", epoch, " is ", total_accuracy)
 
-# Evaluation
-model.eval()
-with torch.no_grad():
-    accuracy = 0
-    for batch_num, pairs in enumerate(testloader):
-        img, label = pairs
-        output = model(img)
-        pred = torch.argmax(dim=1)
+    # Evaluation
+    model.eval()
+    with torch.no_grad():
+        accuracy = 0
+        for _, pairs in tqdm(enumerate(testloader), total=len(testloader)):
+            img, label = pairs
+            logits = model(img)
+            pred = torch.argmax(logits, dim=1)
 
-        accuracy += np.count_nonzero(pred == label)
-    total_accuracy = accuracy / len(testset)
+            accuracy += np.count_nonzero(pred == label)
+        total_accuracy = accuracy / len(testset)
+
+if __name__ == "__main__":
+    main()
         
